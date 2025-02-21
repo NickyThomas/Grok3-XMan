@@ -42,11 +42,10 @@
         let lastUpdateTime = performance.now();
         let flashTimer = 0;
 
-        // Fixed Pac-Man-inspired maze layout with varied paths (25x25 grid)
+        // Fixed maze layout
+        let maze = [];
         function generateMaze() {
-            const maze = Array(tileCount).fill().map(() => Array(tileCount).fill(1)); // All walls initially
-
-            // Define the fixed layout (0 = path, 1 = wall)
+            const maze = Array(tileCount).fill().map(() => Array(tileCount).fill(1));
             const layout = [
                 "1111111111111111111111111",
                 "1000100010001000100010001",
@@ -69,24 +68,55 @@
                 "1011101011101110101110101",
                 "1000001010001000100000101",
                 "1110101110101111101011101",
-                "1000100000100000100010001",
+                "1000100010001000100010001",
                 "1011101010111010111011101",
                 "1000100010001000100010001",
                 "1111111111111111111111111"
             ];
-
-            // Apply the layout to the maze
             for (let y = 0; y < tileCount; y++) {
                 for (let x = 0; x < tileCount; x++) {
                     maze[y][x] = parseInt(layout[y][x]);
                 }
             }
-
             return maze;
         }
-        let maze = generateMaze();
 
-        // Find valid spawn points
+        // Initialize game entities
+        let elon, ghosts;
+        function resetGame() {
+            maze = generateMaze();
+            score = 0;
+            gameOver = false;
+            gameWon = false;
+            powerUpActive = false;
+            powerUpTimer = 0;
+            ghostMoveCooldown = 0;
+            flashTimer = 0;
+
+            const validSpawns = getValidSpawnPoints();
+            const elonSpawn = validSpawns[Math.floor(Math.random() * validSpawns.length)];
+            elon = { x: elonSpawn.x, y: elonSpawn.y, size: gridSize };
+
+            ghosts = [];
+            const spawnDistances = validSpawns.map(spawn => ({
+                ...spawn,
+                distance: Math.sqrt((spawn.x - elon.x) ** 2 + (spawn.y - elon.y) ** 2)
+            }));
+            spawnDistances.sort((a, b) => b.distance - a.distance);
+            const furthestSpawns = spawnDistances.slice(0, 4);
+            for (let i = 0; i < 4; i++) {
+                const spawn = furthestSpawns[i];
+                ghosts.push({
+                    x: spawn.x, y: spawn.y, renderX: spawn.x * gridSize, renderY: spawn.y * gridSize,
+                    color: ['red', 'blue', 'green', 'gray'][i], size: gridSize
+                });
+            }
+
+            spawnPowerUps();
+            document.getElementById('score').textContent = `Score: ${score}`;
+            document.getElementById('timer').textContent = '';
+        }
+
         function getValidSpawnPoints() {
             const validPoints = [];
             for (let y = 0; y < tileCount; y++) {
@@ -97,25 +127,6 @@
                 }
             }
             return validPoints;
-        }
-
-        const validSpawns = getValidSpawnPoints();
-        const elonSpawn = validSpawns[Math.floor(Math.random() * validSpawns.length)];
-        const elon = { x: elonSpawn.x, y: elonSpawn.y, size: gridSize };
-
-        let ghosts = [];
-        const spawnDistances = validSpawns.map(spawn => ({
-            ...spawn,
-            distance: Math.sqrt((spawn.x - elon.x) ** 2 + (spawn.y - elon.y) ** 2)
-        }));
-        spawnDistances.sort((a, b) => b.distance - a.distance);
-        const furthestSpawns = spawnDistances.slice(0, 4);
-        for (let i = 0; i < 4; i++) {
-            const spawn = furthestSpawns[i];
-            ghosts.push({
-                x: spawn.x, y: spawn.y, renderX: spawn.x * gridSize, renderY: spawn.y * gridSize,
-                color: ['red', 'blue', 'green', 'gray'][i], size: gridSize
-            });
         }
 
         let powerUpActive = false;
@@ -151,15 +162,20 @@
                 if (maze[loc.y][loc.x] === 0) {
                     maze[loc.y][loc.x] = 2;
                     console.log(`Power-up placed at (${loc.x}, ${loc.y})`);
-                } else {
-                    console.warn(`Power-up at (${loc.x}, ${loc.y}) could not be placed; tile is not a path.`);
                 }
             });
         }
-        spawnPowerUps();
+
+        // Initialize game
+        resetGame();
 
         document.addEventListener('keydown', (e) => {
-            if (gameOver || gameWon) return;
+            if (gameOver || gameWon) {
+                if (e.key === ' ' || e.key === 'Spacebar') {
+                    resetGame();
+                }
+                return;
+            }
             let newX = elon.x, newY = elon.y;
             switch (e.key.toLowerCase()) {
                 case 'w': newY--; break;
@@ -224,57 +240,58 @@
         }
 
         function update(currentTime) {
-            if (gameOver || gameWon) return;
-            const deltaTime = (currentTime - lastUpdateTime) / 1000;
-            lastUpdateTime = currentTime;
+            if (!gameOver && !gameWon) {
+                const deltaTime = (currentTime - lastUpdateTime) / 1000;
+                lastUpdateTime = currentTime;
 
-            if (powerUpActive) {
-                flashTimer += deltaTime;
-                if (flashTimer >= 0.25) flashTimer = 0;
-            } else {
-                flashTimer = 0;
-            }
-
-            if (maze[elon.y][elon.x] === 0) {
-                maze[elon.y][elon.x] = -1;
-                score += 10;
-            } else if (maze[elon.y][elon.x] === 2) {
-                maze[elon.y][elon.x] = -1;
-                powerUpActive = true;
-                powerUpTimer = 7; // 7 seconds
-                score += 50;
-            }
-
-            moveGhosts(deltaTime);
-            updateGhostRenderPositions();
-
-            ghosts = ghosts.filter((ghost, index) => {
-                if (Math.abs(ghost.x - elon.x) < 1 && Math.abs(ghost.y - elon.y) < 1) {
-                    if (powerUpActive) {
-                        score += 100;
-                        return false;
-                    } else {
-                        gameOver = true;
-                        return true;
-                    }
+                if (powerUpActive) {
+                    flashTimer += deltaTime;
+                    if (flashTimer >= 0.25) flashTimer = 0;
+                } else {
+                    flashTimer = 0;
                 }
-                return true;
-            });
 
-            if (ghosts.length === 0) gameWon = true;
+                if (maze[elon.y][elon.x] === 0) {
+                    maze[elon.y][elon.x] = -1;
+                    score += 10;
+                } else if (maze[elon.y][elon.x] === 2) {
+                    maze[elon.y][elon.x] = -1;
+                    powerUpActive = true;
+                    powerUpTimer = 7;
+                    score += 50;
+                }
 
-            if (powerUpActive) {
-                powerUpTimer -= deltaTime;
-                document.getElementById('timer').textContent = `Power-Up: ${Math.ceil(powerUpTimer)}s`;
-                if (powerUpTimer <= 0) {
-                    powerUpActive = false;
+                moveGhosts(deltaTime);
+                updateGhostRenderPositions();
+
+                ghosts = ghosts.filter((ghost, index) => {
+                    if (Math.abs(ghost.x - elon.x) < 1 && Math.abs(ghost.y - elon.y) < 1) {
+                        if (powerUpActive) {
+                            score += 100;
+                            return false;
+                        } else {
+                            gameOver = true;
+                            return true;
+                        }
+                    }
+                    return true;
+                });
+
+                if (ghosts.length === 0) gameWon = true;
+
+                if (powerUpActive) {
+                    powerUpTimer -= deltaTime;
+                    document.getElementById('timer').textContent = `Power-Up: ${Math.ceil(powerUpTimer)}s`;
+                    if (powerUpTimer <= 0) {
+                        powerUpActive = false;
+                        document.getElementById('timer').textContent = '';
+                    }
+                } else {
                     document.getElementById('timer').textContent = '';
                 }
-            } else {
-                document.getElementById('timer').textContent = '';
-            }
 
-            document.getElementById('score').textContent = `Score: ${score}`;
+                document.getElementById('score').textContent = `Score: ${score}`;
+            }
             draw();
             requestAnimationFrame(update);
         }
@@ -342,6 +359,8 @@
                 ctx.font = '30px Arial';
                 ctx.fillText('The MSM Wokemind virus caught you', 100, 340);
                 ctx.fillText(`Score: ${score}`, 285, 400);
+                ctx.font = '30px Arial';
+                ctx.fillText('Press Spacebar to Play Again', 220, 460);
             } else if (gameWon) {
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -349,6 +368,8 @@
                 ctx.font = '60px Arial';
                 ctx.fillText('You Win!', 285, 340);
                 ctx.fillText(`Score: ${score}`, 285, 400);
+                ctx.font = '30px Arial';
+                ctx.fillText('Press Spacebar to Play Again', 220, 460);
             }
         }
 
