@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Elon's Media Maze</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+            background-color: #000;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+        #score, #timer {
+            font-size: 24px;
+            color: white;
+            background-color: black;
+            padding: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">Score: 0</div>
+    <div id="timer"></div>
+    <canvas id="gameCanvas" width="800" height="800"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gridSize = 40;
+        const tileCount = canvas.width / gridSize;
+
+        // Game state
+        let score = 0;
+        let gameOver = false;
+        let gameWon = false;
+
+        // Generate a perfect maze (no internal traps or dead ends)
+        function generateMaze() {
+            const maze = Array(tileCount).fill().map(() => Array(tileCount).fill(1));
+            const cells = Array(Math.floor(tileCount / 2)).fill().map(() => Array(Math.floor(tileCount / 2)).fill(false));
+
+            function carve(x, y) {
+                cells[y][x] = true;
+                maze[2 * y + 1][2 * x + 1] = 0; // Path tile
+                const directions = [[0, 1], [1, 0], [0, -1], [-1, 0]]; // Down, Right, Up, Left
+                directions.sort(() => Math.random() - 0.5);
+                for (let [dx, dy] of directions) {
+                    const newX = x + dx;
+                    const newY = y + dy;
+                    if (newX >= 0 && newX < cells[0].length && newY >= 0 && newY < cells.length && !cells[newY][newX]) {
+                        maze[2 * y + 1 + dy][2 * x + 1 + dx] = 0; // Carve wall between
+                        carve(newX, newY);
+                    }
+                }
+            }
+            carve(0, 0);
+
+            // Ensure outer boundary is walls, no internal traps
+            for (let i = 0; i < tileCount; i++) {
+                maze[0][i] = 1;
+                maze[tileCount - 1][i] = 1;
+                maze[i][0] = 1;
+                maze[i][tileCount - 1] = 1;
+            }
+
+            // Verify no isolated sections by ensuring all path tiles are connected
+            return maze;
+        }
+        let maze = generateMaze();
+
+        // Find valid spawn points
+        function getValidSpawnPoints() {
+            const validPoints = [];
+            for (let y = 0; y < tileCount; y++) {
+                for (let x = 0; x < tileCount; x++) {
+                    if (maze[y][x] === 0 || maze[y][x] === 2) {
+                        validPoints.push({ x, y });
+                    }
+                }
+            }
+            return validPoints;
+        }
+
+        // Elon Musk (Pac-Man)
+        const validSpawns = getValidSpawnPoints();
+        const elonSpawn = validSpawns[Math.floor(Math.random() * validSpawns.length)];
+        const elon = {
+            x: elonSpawn.x,
+            y: elonSpawn.y,
+            size: 40
+        };
+
+        // Ghosts (Mainstream Media Logos) - Spawn at furthest points
+        let ghosts = [];
+        const spawnDistances = validSpawns.map(spawn => ({
+            ...spawn,
+            distance: Math.sqrt((spawn.x - elon.x) ** 2 + (spawn.y - elon.y) ** 2)
+        }));
+        spawnDistances.sort((a, b) => b.distance - a.distance);
+        const furthestSpawns = spawnDistances.slice(0, 4);
+        for (let i = 0; i < 4; i++) {
+            const spawn = furthestSpawns[i];
+            ghosts.push({
+                x: spawn.x,
+                y: spawn.y,
+                renderX: spawn.x * gridSize,
+                renderY: spawn.y * gridSize,
+                color: ['red', 'blue', 'green', 'gray'][i] // CNN, NBC, BBC, FB
+            });
+        }
+
+        let powerUpActive = false;
+        let powerUpTimer = 0;
+        let ghostMoveCooldown = 0;
+
+        // Load images from ./assets/ directory
+        const elonImg = new Image();
+        elonImg.src = './assets/elon_musk.png';
+        const ghostImgs = [
+            new Image(), // CNN
+            new Image(), // NBC
+            new Image(), // BBC
+            new Image()  // FB
+        ];
+        ghostImgs[0].src = './assets/cnn_logo.png';
+        ghostImgs[1].src = './assets/nbc_logo.png';
+        ghostImgs[2].src = './assets/bbc_logo.png';
+        ghostImgs[3].src = './assets/fb_logo.png';
+        const powerUpImg = new Image();
+        powerUpImg.src = './assets/x_corp_logo.png';
+
+        // Spawn exactly 4 power-ups
+        function spawnPowerUps() {
+            let powerUpCount = 0;
+            const validSpawnsCopy = [...validSpawns];
+            while (powerUpCount < 4 && validSpawnsCopy.length > 0) {
+                const index = Math.floor(Math.random() * validSpawnsCopy.length);
+                const { x, y } = validSpawnsCopy[index];
+                if (maze[y][x] === 0 && !(x === elon.x && y === elon.y)) {
+                    maze[y][x] = 2;
+                    powerUpCount++;
+                }
+                validSpawnsCopy.splice(index, 1);
+            }
+        }
+        spawnPowerUps();
+
+        // WASD controls (move one space per press)
+        document.addEventListener('keydown', (e) => {
+            if (gameOver || gameWon) return;
+            let newX = elon.x;
+            let newY = elon.y;
+            switch (e.key.toLowerCase()) {
+                case 'w': newY--; break;
+                case 's': newY++; break;
+                case 'a': newX--; break;
+                case 'd': newX++; break;
+            }
+            if (maze[newY] && maze[newY][newX] !== 1) {
+                elon.x = newX;
+                elon.y = newY;
+            }
+        });
+
+        // Ghost movement (chase or flee)
+        function moveGhosts() {
+            if (ghostMoveCooldown > 0) {
+                ghostMoveCooldown--;
+                return;
+            }
+            ghostMoveCooldown = 10;
+
+            ghosts.forEach(ghost => {
+                const directions = [
+                    { dx: 0, dy: -1 }, // Up
+                    { dx: 0, dy: 1 },  // Down
+                    { dx: -1, dy: 0 }, // Left
+                    { dx: 1, dy: 0 }   // Right
+                ];
+                let bestMove = null;
+                let extremeDistance = powerUpActive ? -Infinity : Infinity;
+
+                directions.forEach(dir => {
+                    const newX = ghost.x + dir.dx;
+                    const newY = ghost.y + dir.dy;
+                    if (maze[newY] && maze[newY][newX] !== 1) {
+                        const distance = Math.sqrt((newX - elon.x) ** 2 + (newY - elon.y) ** 2);
+                        if (powerUpActive) {
+                            if (distance > extremeDistance) {
+                                extremeDistance = distance;
+                                bestMove = { x: newX, y: newY };
+                            }
+                        } else {
+                            if (distance < extremeDistance) {
+                                extremeDistance = distance;
+                                bestMove = { x: newX, y: newY };
+                            }
+                        }
+                    }
+                });
+
+                if (Math.random() < 0.3 && directions.length > 0) {
+                    const validMoves = directions.filter(dir => {
+                        const newX = ghost.x + dir.dx;
+                        const newY = ghost.y + dir.dy;
+                        return maze[newY] && maze[newY][newX] !== 1;
+                    });
+                    if (validMoves.length > 0) {
+                        const randomMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+                        bestMove = { x: ghost.x + randomMove.dx, y: ghost.y + randomMove.dy };
+                    }
+                }
+
+                if (bestMove) {
+                    ghost.x = bestMove.x;
+                    ghost.y = bestMove.y;
+                }
+            });
+        }
+
+        // Smooth ghost interpolation
+        function updateGhostRenderPositions() {
+            ghosts.forEach(ghost => {
+                const targetX = ghost.x * gridSize;
+                const targetY = ghost.y * gridSize;
+                ghost.renderX += (targetX - ghost.renderX) * 0.1;
+                ghost.renderY += (targetY - ghost.renderY) * 0.1;
+            });
+        }
+
+        // Game loop
+        function update() {
+            if (gameOver || gameWon) return;
+
+            // Collect dots and power-ups
+            if (maze[elon.y][elon.x] === 0) {
+                maze[elon.y][elon.x] = -1;
+                score += 10;
+            } else if (maze[elon.y][elon.x] === 2) {
+                maze[elon.y][elon.x] = -1;
+                powerUpActive = true;
+                powerUpTimer = 200;
+                score += 50;
+            }
+
+            // Move and update ghosts
+            moveGhosts();
+            updateGhostRenderPositions();
+
+            // Check collisions
+            ghosts = ghosts.filter((ghost, index) => {
+                if (Math.abs(ghost.x - elon.x) < 1 && Math.abs(ghost.y - elon.y) < 1) {
+                    if (powerUpActive) {
+                        score += 100; // Player eats ghost
+                        return false; // Remove ghost
+                    } else {
+                        gameOver = true; // Ghost kills player
+                        return true;
+                    }
+                }
+                return true; // No collision, keep ghost
+            });
+
+            // Win condition
+            if (ghosts.length === 0) {
+                gameWon = true;
+            }
+
+            // Power-up timer
+            if (powerUpActive) {
+                powerUpTimer--;
+                document.getElementById('timer').textContent = `Power-Up: ${Math.ceil(powerUpTimer / 20)}s`;
+                if (powerUpTimer <= 0) {
+                    powerUpActive = false;
+                    document.getElementById('timer').textContent = '';
+                }
+            } else {
+                document.getElementById('timer').textContent = '';
+            }
+
+            // Update score
+            document.getElementById('score').textContent = `Score: ${score}`;
+
+            // Draw everything
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw maze
+            for (let y = 0; y < tileCount; y++) {
+                for (let x = 0; x < tileCount; x++) {
+                    if (maze[y][x] === 1) {
+                        ctx.fillStyle = 'blue';
+                        ctx.fillRect(x * gridSize, y * gridSize, gridSize, gridSize);
+                    } else if (maze[y][x] === 0) {
+                        ctx.fillStyle = 'white';
+                        ctx.fillRect(x * gridSize + 16, y * gridSize + 16, 8, 8);
+                    } else if (maze[y][x] === 2) {
+                        ctx.drawImage(powerUpImg, x * gridSize, y * gridSize, gridSize, gridSize);
+                    }
+                }
+            }
+
+            // Draw Elon
+            ctx.drawImage(elonImg, elon.x * gridSize, elon.y * gridSize, gridSize, gridSize);
+
+            // Draw ghosts with smooth positions
+            ctx.globalAlpha = powerUpActive ? 0.5 : 1;
+            ghosts.forEach((ghost, index) => {
+                ctx.drawImage(ghostImgs[index], ghost.renderX, ghost.renderY, gridSize, gridSize);
+            });
+            ctx.globalAlpha = 1;
+
+            // Game over or win screen
+            if (gameOver) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'white';
+                ctx.font = '60px Arial';
+                ctx.fillText('Game Over', 240, 360);
+                ctx.fillText(`Score: ${score}`, 280, 440);
+            } else if (gameWon) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'white';
+                ctx.font = '60px Arial';
+                ctx.fillText('You Win!', 260, 360);
+                ctx.fillText(`Score: ${score}`, 280, 440);
+            }
+        }
+
+        // Start the game
+        update();
+    </script>
+</body>
+</html>
